@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+
+require 'ffi-rzmq'
+require 'optparse'
+
+options = {
+	:transport => 'tcp://127.0.0.1:9000',
+}
+
+parser = OptionParser.new do|opts|
+	opts.banner = "Usage: zmq-pub [options]"
+
+	opts.on('-b', '--bind TRANSPORT', 'Transport') do |transport|
+		options[:transport] = transport
+	end
+
+	opts.on('-t', '--topic TOPIC', 'Topic to publish') do |topic|
+		options[:topic] = topic
+	end
+
+	opts.on('-b', '--body BODY', 'Body of the message') do |body|
+		options[:body] = body
+	end
+
+	opts.on('-h', '--help', 'Displays Help') do
+		puts opts
+		exit
+	end
+end
+
+parser.parse!
+
+raise 'need topic' if options[:topic].nil?
+raise 'need body' if options[:body].nil?
+
+def error_check(rc)
+  if not ZMQ::Util.resultcode_ok?(rc)
+    raise "Operation failed, errno [#{ZMQ::Util.errno}] description [#{ZMQ::Util.error_string}]"
+  end
+end
+
+context = ZMQ::Context.new 1
+sock = context.socket ZMQ::PUB
+error_check(sock.setsockopt(ZMQ::LINGER, 1))
+error_check(sock.connect(options[:transport]))
+error_check(sock.send_string(options[:topic], ZMQ::SNDMORE))
+error_check(sock.send_string(options[:body]))
+error_check(sock.close)

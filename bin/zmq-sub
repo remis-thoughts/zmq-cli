@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+
+require 'ffi-rzmq'
+require 'optparse'
+
+options = {
+	:transport => 'tcp://127.0.0.1:9000',
+	:subscriptions => []
+}
+
+parser = OptionParser.new do|opts|
+	opts.banner = "Usage: zmq-sub [options]"
+
+	opts.on('-c', '--connect TRANSPORT', 'Transport') do |transport|
+		options[:transport] = transport;
+	end
+
+	opts.on('-t', '--topic TOPIC', 'Topic to subscribe to') do |topic|
+		options[:subscriptions] << topic
+	end
+
+	opts.on('-h', '--help', 'Displays Help') do
+		puts opts
+		exit
+	end
+end
+
+parser.parse!
+
+options[:subscriptions] << "" if options[:subscriptions].empty?
+
+
+def error_check(rc)
+  if not ZMQ::Util.resultcode_ok?(rc)
+    raise "Operation failed, errno [#{ZMQ::Util.errno}] description [#{ZMQ::Util.error_string}]"
+  end
+end
+
+context = ZMQ::Context.new 1
+sock = context.socket ZMQ::SUB
+options[:subscriptions].each do |sub|
+	sock.setsockopt(ZMQ::SUBSCRIBE, sub)
+end
+error_check(sock.setsockopt(ZMQ::LINGER, 1))
+error_check(sock.connect(options[:transport]))
+
+loop do
+  topic, body = '', ''
+  error_check(sock.recv_string(topic))
+  raise 'expected body after topic' if not sock.more_parts?
+  error_check(sock.recv_string(body))
+  raise 'expected just topic & body' if sock.more_parts?
+  
+  puts "#{topic} #{body}"
+end
+
+error_check(sock.close)
