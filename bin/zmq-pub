@@ -41,8 +41,12 @@ end
 
 context = ZMQ::Context.new 1
 sock = context.socket ZMQ::PUB
-error_check(sock.setsockopt(ZMQ::LINGER, 1))
 error_check(sock.connect(options[:transport]))
+
+# need to wait for bound socket to subscribe to us
+sleep(1)
+
 error_check(sock.send_string(options[:topic], ZMQ::SNDMORE))
 error_check(sock.send_string(options[:body]))
 error_check(sock.close)
+error_check(context.terminate)

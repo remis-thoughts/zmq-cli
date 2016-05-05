@@ -4,7 +4,7 @@ require 'ffi-rzmq'
 require 'optparse'
 
 options = {
-	:transport => 'tcp://127.0.0.1:9000',
+	:transport => 'tcp://127.0.0.1:9001',
 	:subscriptions => []
 }
 

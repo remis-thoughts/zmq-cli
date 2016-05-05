@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+
+require 'ffi-rzmq'
+require 'leveldb-native'
+require 'optparse'
+
+options = {
+	:sub_transport => 'tcp://127.0.0.1:9000',
+	:pub_transport => 'tcp://127.0.0.1:9001',
+	:db => '/tmp/zmq-bridge'
+}
+
+parser = OptionParser.new do|opts|
+	opts.banner = "Usage: zmq-pub [options]"
+
+	opts.on('-p', '--pub TRANSPORT', 'Transport to publish on') do |transport|
+		options[:pub_transport] = transport
+	end
+
+	opts.on('-s', '--sub TRANSPORT', 'Transport to subscribe to') do |transport|
+		options[:sub_transport] = transport
+	end
+
+	opts.on('-d', '--db PATH', 'Path for the leveldb message store') do |db|
+		options[:db] = db
+	end
+
+	opts.on('-h', '--help', 'Displays Help') do
+		puts opts
+		exit
+	end
+end
+
+parser.parse!
+
+def error_check(rc)
+  if not ZMQ::Util.resultcode_ok?(rc)
+    raise "Operation failed, errno [#{ZMQ::Util.errno}] description [#{ZMQ::Util.error_string}]"
+  end
+  rc
+end
+
+context = ZMQ::Context.new 1
+poller = ZMQ::Poller.new
+db = LevelDBNative::DB.new options[:db]
+
+pub_sock = context.socket ZMQ::XPUB
+error_check(pub_sock.setsockopt(ZMQ::LINGER, 1))
+error_check(pub_sock.bind(options[:pub_transport]))
+poller.register_readable(pub_sock)
+
+sub_sock = context.socket ZMQ::SUB
+error_check(sub_sock.setsockopt(ZMQ::LINGER, 1))
+error_check(sub_sock.setsockopt(ZMQ::SUBSCRIBE, ""))
+error_check(sub_sock.bind(options[:sub_transport]))
+poller.register_readable(sub_sock)
+
+loop do
+	if error_check(poller.poll) > 0
+		poller.readables.each do |s|
+			case s
+			when pub_sock
+				str = ''
+				error_check(s.recv_string(str))
+				if str[0] == "\x01"
+					topic = str[1..-1]
+					db.each(:from => topic).each do |k, v|
+						break if not k.start_with? topic # as :to is exclusive
+						error_check(pub_sock.send_strings([k, v]))
+					end
+				end
+			when sub_sock
+				msg = []
+				error_check(s.recvmsgs(msg))
+				db[msg[0].copy_out_string] = msg[1].copy_out_string
+				error_check(pub_sock.sendmsgs(msg))
+			end
+		end
+	end
+end
+
+error_check(sub_sock.close)
+error_check(pub_sock.close)
